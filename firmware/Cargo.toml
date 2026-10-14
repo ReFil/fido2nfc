@@ -1,0 +1,42 @@
+[package]
+name = "fido2nfc-firmware"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ch32-hal = { git = "https://github.com/ch32-rs/ch32-hal.git", features = [
+    "ch32v203g6u6",
+    "memory-x",
+    "embassy",
+    "rt",
+    "time-driver-tim2",
+], default-features = false }
+
+embassy-executor = { version = "0.10.0", features = [
+    "platform-spin",
+    "executor-thread",
+] }
+
+embassy-time = "0.5.1"
+embedded-hal-async = "1.0"
+embassy-usb = { version = "0.6.0" }
+embassy-usb-driver = "=0.2.2"
+embassy-futures = { version = "0.1.2" }
+smart-leds = "0.4.0"
+ws2812-delay = { git = "https://github.com/rappet/ws2812-delay-rs.git", features = ["slow"]}
+
+# This is okay because we should automatically use whatever ch32-hal uses
+qingke-rt = "0.8"
+qingke = "0.8"
+
+panic-halt = "1.0"
+
+embedded-hal = "1.0.0"
+heapless = "0.8.0"
+micromath = { version = "2.1.0", features = ["num-traits"] }
+
+
+[profile.release]
+strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
+lto = true
+opt-level = "z" # Optimize for size.
