@@ -23,13 +23,13 @@ fn main() -> ! {
     let mut color = Hsv {
         hue: 40,
         sat: 255,
-        val: 50,
+        val: 5,
     };
 
     loop {
         color.hue = color.hue.wrapping_add(1);
         let _ = led.write(once(hsv2rgb(color)));
-        delay.delay_ms(1);
+        delay.delay_ms(5);
     }
 }
 
