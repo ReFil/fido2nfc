@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use ch32_hal::peripherals;
 use embassy_executor::Spawner;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_time::Timer;
@@ -9,10 +10,50 @@ use hal::usbd::{Driver };
 use hal::{bind_interrupts};
 use {ch32_hal as hal, panic_halt as _};
 use static_cell::StaticCell;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::pipe::Pipe;
+
+use core::iter::once;
+use hal::delay::Delay;
+use hal::gpio::{Level, Output, Speed};
+use smart_leds::hsv::{hsv2rgb, Hsv};
+use smart_leds::SmartLedsWrite;
+use ws2812_delay::Ws2812;
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => hal::usbd::InterruptHandler<hal::peripherals::USBD>;
 });
+
+pub static LOGGING_PIPE: Pipe<CriticalSectionRawMutex, 64> = Pipe::new();
+
+#[embassy_executor::task]
+async fn cdc_task(
+    mut cdc: CdcAcmClass<'static, Driver<'static, peripherals::USBD>>
+) {
+    loop {
+        cdc.wait_connection().await;
+
+        loop {
+
+            if (!LOGGING_PIPE.is_empty()) {
+                let mut buf: [u8; 64] = [0; 64];
+
+                let read = LOGGING_PIPE.read(&mut buf).await;
+
+                if cdc.write_packet(&buf[..read]).await.is_err() {
+                    break;
+                }
+
+                LOGGING_PIPE.clear();
+            }
+
+            
+
+            Timer::after_millis(50).await;
+        }
+    }
+}
+
 
 #[embassy_executor::task]
 async fn usb_task(mut usb: UsbDevice<'static, Driver<'static, hal::peripherals::USBD>>) {
@@ -72,23 +113,27 @@ async fn main(spawner: Spawner) {
 
     // Build and spawn the USB device task
     let usb = builder.build();
+    spawner.spawn(cdc_task(cdc).unwrap());
     spawner.spawn(usb_task(usb).unwrap());
 
+    let pin = Output::new(p.PA4, Level::Low, Speed::High);
+    let mut led = Ws2812::new(Delay, pin);
+
+    let mut color = Hsv {
+        hue: 40,
+        sat: 255,
+        val: 5,
+    };
+
+
     loop {
-        // Wait for the host to open the serial port
-        cdc.wait_connection().await;
 
-        loop {
-
-            // Format the output string
-            let msg: [u8; 13] = [0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64, 0x0A, 0x0D];
-
+            color.hue = color.hue.wrapping_add(10);
+            let _ = led.write(once(hsv2rgb(color)));
             // Write to USB CDC; break if disconnected
-            if cdc.write_packet(&msg).await.is_err() {
-                break;
-            }
+            let _ = LOGGING_PIPE.try_write(b"grelp\n\r");
 
-            Timer::after_millis(500).await;
-        }
+            Timer::after_millis(50).await;
+
     }
 }
