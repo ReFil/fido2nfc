@@ -22,6 +22,7 @@ embedded-hal-async = "1.0"
 embassy-usb = { version = "0.6.0" }
 embassy-usb-driver = "=0.2.2"
 embassy-futures = { version = "0.1.2" }
+embassy-sync = { version = "0.6" }
 smart-leds = "0.4.0"
 ws2812-delay = { git = "https://github.com/rappet/ws2812-delay-rs.git" }
 
@@ -34,9 +35,9 @@ panic-halt = "1.0"
 embedded-hal = "1.0.0"
 heapless = "0.8.0"
 micromath = { version = "2.1.0", features = ["num-traits"] }
+portable-atomic = { version = "1", features = ["critical-section"] }
+static_cell = "2.1.1"
 
-[profile.dev]
-opt-level = 's'
 
 [profile.release]
 strip = false     # symbols are not flashed to the microcontroller, so don't strip them.
