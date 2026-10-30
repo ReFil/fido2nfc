@@ -38,6 +38,8 @@ micromath = { version = "2.1.0", features = ["num-traits"] }
 portable-atomic = { version = "1", features = ["critical-section"] }
 static_cell = "2.1.1"
 
+st25r95 = "0.7.0"
+iso14443 = "0.3.1"
 
 [profile.release]
 strip = false     # symbols are not flashed to the microcontroller, so don't strip them.

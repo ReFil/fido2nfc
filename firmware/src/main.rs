@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+pub mod cdcdebug;
+use crate::cdcdebug::cdc_task;
+
 use ch32_hal::peripherals;
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
@@ -50,142 +53,14 @@ const FIDO2_HID_DESC: &[u8] = &[
 pub static LOGGING_PIPE: Pipe<CriticalSectionRawMutex, 64> = Pipe::new();
 
 #[embassy_executor::task]
-async fn cdc_task(
-    mut cdc: CdcAcmClass<'static, Driver<'static, peripherals::USBD>>
-) {
-    loop {
-        cdc.wait_connection().await;
-
-        loop {
-
-            if !LOGGING_PIPE.is_empty() {
-                let mut buf: [u8; 64] = [0; 64];
-
-                let read = LOGGING_PIPE.read(&mut buf).await;
-
-                if cdc.write_packet(&buf[..read]).await.is_err() {
-                    break;
-                }
-
-                LOGGING_PIPE.clear();
-            }
-
-            
-
-            Timer::after_millis(50).await;
-        }
-    }
-}
-
-#[embassy_executor::task]
 async fn hid_task(
     hid: HidReaderWriter<'static, Driver<'static, peripherals::USBD>, 1, 1>,
 ) {
     let (mut reader, mut writer) = hid.split();
-    let mut pkt = [u8; 64];
 
     loop {
-        // A read with a deadline, so a transaction that was promised and never
-        // finished expires even if the host never sends another byte. Without
-        // this the channel is held until something arrives, which is a device
-        // that one truncated message takes out of service.
-        let deadline = if t.busy() { Duration::from_millis(750) } else { Duration::from_secs(3600) };
-        let got = match select(reader.read(&mut pkt), Timer::after(deadline)).await {
-            Either::First(Ok(n)) => n,
-            Either::First(Err(_)) => continue,
-            Either::Second(()) => {
-                if t.busy() {
-                    let c = t.cid;
-                    t.clear();
-                    ERRORS.fetch_add(1, Ordering::Relaxed);
-                    log!("  cid {} timed out with {}/{} bytes", Hex(&c), t.have, t.want);
-                    Timer::after(PACE).await;
-                    send(&mut writer, c, CTAPHID_ERROR, &[ERR_MSG_TIMEOUT]).await;
-                }
-                continue;
-            }
-        };
+                   Timer::after_millis(50).await;
 
-        PACKETS_IN.fetch_add(1, Ordering::Relaxed);
-        let is_init = got >= 5 && pkt[4] & 0x80 != 0;
-        let cid: Cid = [pkt[0], pkt[1], pkt[2], pkt[3]];
-
-        // **Only initialisation packets are logged, and that is not tidiness.**
-        // The first version printed a paced line for every packet, and a
-        // 1024-byte PING is eighteen of them: at 60 ms a line the device spent
-        // 1.08 s reassembling a message its own 750 ms deadline then expired.
-        // A legal message failed because the instrument was slower than the
-        // subject. Continuation packets are counted and reported once, when the
-        // message is whole.
-        if is_init {
-            log!(
-                "in  cid {} {} bcnt {}",
-                Hex(&cid),
-                cmd_name(pkt[4] & 0x7f),
-                ((pkt[5] as u16) << 8) | pkt[6] as u16
-            );
-            Timer::after(PACE).await;
-        }
-
-        match feed(t, &pkt[..got]) {
-            Action::Ignore(why) => {
-                log!("  ignored: {}", why);
-                Timer::after(PACE).await;
-            }
-            Action::More => {}
-            Action::Error(c, code) => {
-                ERRORS.fetch_add(1, Ordering::Relaxed);
-                log!("  ERROR {:#04x} to cid {}", code, Hex(&c));
-                Timer::after(PACE).await;
-                send(&mut writer, c, CTAPHID_ERROR, &[code]).await;
-            }
-            Action::Complete => {
-                MESSAGES.fetch_add(1, Ordering::Relaxed);
-                let (cid, cmd, len) = (t.cid, t.cmd, t.want);
-                if len > INIT_PAYLOAD {
-                    log!("  assembled {} bytes in {} ms", len, t.started.elapsed().as_millis());
-                    Timer::after(PACE).await;
-                }
-                match cmd {
-                    CTAPHID_INIT => {
-                        // nonce(8) + new channel(4) + protocol(1) + version(3)
-                        // + capabilities(1). The nonce is echoed so a host can
-                        // tell its own INIT response from somebody else's.
-                        let new = allocate_cid();
-                        let mut r = [0u8; 17];
-                        r[..8].copy_from_slice(&t.buf[..8]);
-                        r[8..12].copy_from_slice(&new);
-                        r[12] = 2; // CTAPHID protocol version
-                        r[13] = 0; // device major
-                        r[14] = 1; // device minor
-                        r[15] = 0; // device build
-                        r[16] = CAPABILITIES;
-                        t.clear();
-                        log!("  INIT: nonce {} -> cid {}", Hex(&r[..8]), Hex(&new));
-                        Timer::after(PACE).await;
-                        send(&mut writer, cid, CTAPHID_INIT, &r).await;
-                    }
-                    CTAPHID_PING => {
-                        // The whole of PING: send back exactly what arrived.
-                        // Which makes it the only command whose correctness is
-                        // entirely about the reassembly above and the
-                        // fragmentation below.
-                        let n = len;
-                        t.clear();
-                        let packets = send(&mut writer, cid, CTAPHID_PING, &t.buf[..n]).await;
-                        log!("  PING: echoed {} bytes in {} packets", n, packets);
-                        Timer::after(PACE).await;
-                    }
-                    other => {
-                        t.clear();
-                        ERRORS.fetch_add(1, Ordering::Relaxed);
-                        log!("  {} is not implemented here: ERR_INVALID_CMD", cmd_name(other));
-                        Timer::after(PACE).await;
-                        send(&mut writer, cid, CTAPHID_ERROR, &[ERR_INVALID_CMD]).await;
-                    }
-                }
-            }
-        }
     }
 }
 
